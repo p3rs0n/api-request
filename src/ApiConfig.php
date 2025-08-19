@@ -2,15 +2,23 @@
 
 namespace p3rs0n\ApiRequest;
 
-abstract class ApiConfig //TODO interface?
+use Psr\Cache\CacheItemPoolInterface;
+use Psr\Log\LoggerInterface;
+
+abstract class ApiConfig
 {
-    public string $baseUri = '';
-    public int $timeout = 0;
-    public function getClientConfiguration(): array
+    public function __construct(
+        public array $clientConfiguration = [],
+        public ?CacheItemPoolInterface $cache = null,
+        public ?LoggerInterface $logger = null,
+        public ?ApiAuthenticationProviderInterface $authenticationProvider = null,
+    )
     {
-        return [
-            'base_uri' => $this->baseUri,
-            'timeout' => $this->timeout,
-        ];
     }
+
+    public static function make(...$args): static
+    {
+        return new static(...$args);
+    }
+
 }

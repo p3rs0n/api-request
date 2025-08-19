@@ -2,103 +2,28 @@
 
 namespace p3rs0n\ApiRequest;
 
+use Closure;
+use Exception;
 use GuzzleHttp\Exception\RequestException;
 use p3rs0n\ApiRequest\Enums\MethodEnum;
+use p3rs0n\ApiRequest\Exceptions\RequestValidationFailedException;
+use Psr\Http\Message\ResponseInterface;
 
 abstract class ApiRequest
 {
-    protected string $uri = '';
+    public string $uri = '';
     public MethodEnum $method = MethodEnum::GET;
-    private array $headers = [];
-    private array $body = [];
-    private array $query = [];
-    private array $values = [];
-    private $validator;
-    private $errorHandler;
-    private $responseHandler;
-    private bool $cached = true;
+    public bool $shouldLog = false;
+    public bool $shouldCache = false;
+    public int $cacheTtl = 60;
+    private ?Closure $errorHandler = null;
 
-    abstract protected function getApiConfig(): ApiConfig;
-
-    public function execute(): mixed
-    {
-        if($this->validator){
-            $validator = $this->validator;
-            $validator($this);
-        }
-
-        try {
-            $response = ApiClient::make($this->getApiConfig())->query($this);
-        }catch (RequestException $e){
-            if($this->errorHandler){
-                $errorHandler = $this->errorHandler;
-                $errorHandler($this, $e); //TODO response
-            }else{
-                throw $e;
-            }
-        }catch (\Exception $e){
-            dd($e);
-        }
-
-        if($this->responseHandler){
-            $responseHandler = $this->responseHandler;
-            $responseHandler($response);
-        }
-
-        return $response;
-    }
-
-    abstract public function getQueryParameters(): array;
-    abstract public function getBodyParameters(): array;
-
-    public function __set(string $name, $value): void
-    {
-        $this->values[$name] = $value;
-    }
-
-    public function __get(string $name): mixed
-    {
-        return $this->values[$name] ?? null;
-    }
-
-    public function __isset(string $name): bool
-    {
-        return isset($this->values[$name]);
-    }
-
-    public function withValidator(callable $validator): static
-    {
-        $this->validator = $validator;
-        return $this;
-    }
-
-    public function withErrorHandler(callable $errorHandler): static
-    {
-        $this->errorHandler = $errorHandler;
-        return $this;
-    }
-
-    public function withResponseHandler(callable $responseHandler): static
-    {
-        $this->responseHandler = $responseHandler;
-        return $this;
-    }
-
-    public function withValues(array $values): static
-    {
-        $this->values = $values;
-        return $this;
-    }
-
-    public function setValue(string $key, $value): static
-    {
-        $this->values[$key] = $value;
-        return $this;
-    }
-
-    public function getValues(): array
-    {
-        return $this->values;
+    public function __construct(
+        public array $headers = [],
+        public array $body = [],
+        public array $query = [],
+        public array $route = [],
+    ) {
     }
 
     public static function make(...$args): static
@@ -106,16 +31,48 @@ abstract class ApiRequest
         return new static(...$args);
     }
 
-    public function setHeader(string $key, string $value): static
+    public function execute(bool $disableCache = false): ?ResponseInterface
     {
-        $this->headers[$key] = $value;
-        return $this;
+        if (!$this->validate()) {
+            throw new RequestValidationFailedException($this);
+        }
+        if (!$disableCache && $cachedResponse = $this->getCachedResponse()) {
+            return $cachedResponse;
+        }
+        try {
+            $response = ApiClient::make($this->getApiConfig())->query($this);
+            if (!$disableCache) {
+                $this->cacheResponse($response);
+            }
+            $this->logSuccess($response);
+        } catch (Exception $e) {
+            $response = null;
+            if ($e instanceof RequestException && $e->hasResponse()) {
+                $response = $e->getResponse();
+            }
+            $this->logError($response, $e);
+            if ($this->errorHandler) {
+                ($this->errorHandler)($this, $e, $response);
+            }
+            if ($errorHandler = $this->getErrorHandler()) {
+                $errorHandler->handle($this, $e, $response);
+            }
+            else {
+                throw $e;
+            }
+            return null;
+        }
+        return $response;
     }
 
-    public function withHeaders(array $headers): static
+    public function getQueryParameters(): array
     {
-        $this->headers = $headers;
-        return $this;
+        return $this->query;
+    }
+
+    public function getBodyParameters(): array
+    {
+        return $this->body;
     }
 
     public function getHeaders(): array
@@ -123,21 +80,124 @@ abstract class ApiRequest
         return $this->headers;
     }
 
-    public function setUri(string $uri): static
-    {
-        $this->uri = $uri;
-        return $this;
-    }
-
     public function getUri(): string
     {
+        if ($this->route) {
+            return preg_replace_callback(
+                '/\{(\w+)}/',
+                function ($matches) {
+                    return $this->route[$matches[1]] ?? $matches[0];
+                },
+                $this->uri
+            );
+        }
         return $this->uri;
     }
 
-    public function setMethod(MethodEnum $method): static
+    public function getErrorHandler(): ?ApiErrorHandlerInterface
     {
-        $this->method = $method;
+        return null;
+    }
+
+    public function withErrorHandler(Closure $errorHandler): static
+    {
+        $this->errorHandler = $errorHandler;
         return $this;
     }
+
+    public function validate(): bool
+    {
+        return true;
+    }
+
+    public function getCacheKey(): string
+    {
+        try {
+            return 'request_'.md5(
+                    self::class.$this->getUri().$this->method->value.json_encode(
+                        [
+                            'headers' => $this->getHeaders(),
+                            'query'   => $this->getQueryParameters(),
+                            'body'    => $this->getBodyParameters(),
+                        ],
+                        JSON_THROW_ON_ERROR
+                    )
+                );
+        } catch (Exception) {
+        }
+        return 'request_'.md5(random_bytes(32));
+    }
+
+    private function getCachedResponse(): ?ResponseInterface
+    {
+        if ($this->shouldCache && $this->cacheTtl > 0 && $this->getApiConfig()->cache) {
+            $cachedResponse = $this->getApiConfig()->cache->getItem($this->getCacheKey())->get();
+            if ($cachedResponse) {
+                return $cachedResponse;
+            }
+        }
+        return null;
+    }
+
+    private function cacheResponse(ResponseInterface $response): void
+    {
+        if ($this->shouldCache && $this->cacheTtl > 0 && $this->getApiConfig()->cache) {
+            $this->getApiConfig()->cache->getItem($this->getCacheKey())->expiresAfter($this->cacheTtl)->set($response);
+        }
+    }
+
+    private function logSuccess(ResponseInterface $response): void
+    {
+        if (!$this->shouldLog || !$this->getApiConfig()->logger) {
+            return;
+        }
+        $this->getApiConfig()->logger->info(
+            self::class.' - Success',
+            [
+                                        'request'  => [
+                                            'uri'     => $this->getUri(),
+                                            'method'  => $this->method->value,
+                                            'headers' => $this->getHeaders(),
+                                            'query'   => $this->getQueryParameters(),
+                                            'body'    => $this->getBodyParameters(),
+                                        ],
+                                        'response' => [
+                                            'status_code' => $response->getStatusCode(),
+                                            'body'        => substr($response->getBody()->getContents(), 0, 1000),
+                                        ],
+                                    ]
+        );
+    }
+
+    private function logError(?ResponseInterface $response, Exception $e): void
+    {
+        if (!$this->shouldLog || !$this->getApiConfig()->logger) {
+            return;
+        }
+        $this->getApiConfig()->logger->error(
+            self::class.' - Error',
+            [
+                                      'request'  => [
+                                          'uri'     => $this->getUri(),
+                                          'method'  => $this->method->value,
+                                          'headers' => $this->getHeaders(),
+                                          'query'   => $this->getQueryParameters(),
+                                          'body'    => $this->getBodyParameters(),
+                                      ],
+                                      'response' => [
+                                          'status_code' => $response?->getStatusCode() ?? 0,
+                                          'body'        => substr($response?->getBody()->getContents() ?? '', 0, 1000),
+                                      ],
+                                      'error'    => [
+                                          'message' => $e->getMessage(),
+                                          'code'    => $e->getCode(),
+                                          'file'    => $e->getFile(),
+                                          'line'    => $e->getLine(),
+                                      ],
+                                  ]
+        );
+    }
+
+    abstract public function getApiConfig(): ApiConfig;
 
 }
