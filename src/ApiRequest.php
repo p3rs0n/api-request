@@ -62,6 +62,11 @@ abstract class ApiRequest
             }
             return null;
         }
+        return $this->processResponse($response);
+    }
+
+    public function processResponse(?ResponseInterface $response): mixed
+    {
         return $response;
     }
 
