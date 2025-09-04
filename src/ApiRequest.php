@@ -80,6 +80,11 @@ abstract class ApiRequest
         return $this->body;
     }
 
+    public function getRawBody(): ?string
+    {
+        return null;
+    }
+
     public function getHeaders(): array
     {
         return $this->headers;

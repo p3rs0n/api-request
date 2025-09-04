@@ -31,7 +31,7 @@ class ApiClient
             [
                 'headers' => $this->getHeaders($request),
                 'query'   => $this->getQueryParameters($request),
-                'body'    => json_encode($this->getBodyParameters($request), JSON_THROW_ON_ERROR),
+                'body'    => $request->getRawBody() ?? json_encode($this->getBodyParameters($request), JSON_THROW_ON_ERROR),
             ]
         );
     }
