@@ -15,7 +15,7 @@ abstract class ApiRequest
     public MethodEnum $method = MethodEnum::GET;
     public bool $shouldLog = false;
     public bool $shouldCache = false;
-    public int $cacheTtl = 60;
+    public int $cacheTtl = 0;
     private ?Closure $errorHandler = null;
 
     public function __construct(
@@ -31,7 +31,7 @@ abstract class ApiRequest
         return new static(...$args);
     }
 
-    public function execute(bool $disableCache = false): ?ResponseInterface
+    public function execute(bool $disableCache = false): mixed
     {
         if (!$this->validate()) {
             throw new RequestValidationFailedException($this);
