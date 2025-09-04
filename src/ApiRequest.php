@@ -3,11 +3,11 @@
 namespace p3rs0n\ApiRequest;
 
 use Closure;
-use Exception;
 use GuzzleHttp\Exception\RequestException;
 use p3rs0n\ApiRequest\Enums\MethodEnum;
 use p3rs0n\ApiRequest\Exceptions\RequestValidationFailedException;
 use Psr\Http\Message\ResponseInterface;
+use Throwable;
 
 abstract class ApiRequest
 {
@@ -45,7 +45,7 @@ abstract class ApiRequest
                 $this->cacheResponse($response);
             }
             $this->logSuccess($response);
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             $response = null;
             if ($e instanceof RequestException && $e->hasResponse()) {
                 $response = $e->getResponse();
@@ -133,7 +133,7 @@ abstract class ApiRequest
                         JSON_THROW_ON_ERROR
                     )
                 );
-        } catch (Exception) {
+        } catch (Throwable) {
         }
         return 'request_'.md5(random_bytes(32));
     }
@@ -179,7 +179,7 @@ abstract class ApiRequest
         );
     }
 
-    private function logError(?ResponseInterface $response, Exception $e): void
+    private function logError(?ResponseInterface $response, Throwable $e): void
     {
         if (!$this->shouldLog || !$this->getApiConfig()->logger) {
             return;
