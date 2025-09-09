@@ -177,6 +177,7 @@ abstract class ApiRequest
                                         ],
                                     ]
         );
+        $response->getBody()->rewind();
     }
 
     private function logError(?ResponseInterface $response, Throwable $e): void
@@ -206,6 +207,7 @@ abstract class ApiRequest
                                       ],
                                   ]
         );
+        $response?->getBody()->rewind();
     }
 
     abstract public function getApiConfig(): ApiConfig;
