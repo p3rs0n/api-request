@@ -173,7 +173,7 @@ abstract class ApiRequest
                                         ],
                                         'response' => [
                                             'status_code' => $response->getStatusCode(),
-                                            'body'        => substr($response->getBody()->getContents(), 0, 1000),
+                                            'body'        => $response->getBody()->getContents() ?? '',
                                         ],
                                     ]
         );
@@ -197,7 +197,7 @@ abstract class ApiRequest
                                       ],
                                       'response' => [
                                           'status_code' => $response?->getStatusCode() ?? 0,
-                                          'body'        => substr($response?->getBody()->getContents() ?? '', 0, 1000),
+                                          'body'        => $response?->getBody()->getContents() ?? '',
                                       ],
                                       'error'    => [
                                           'message' => $e->getMessage(),
