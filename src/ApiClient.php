@@ -9,7 +9,8 @@ use Psr\Http\Message\ResponseInterface;
 
 class ApiClient
 {
-    private static ?Client $client = null;
+    /** @var List<ApiConfig> */
+    private static array $clients = [];
 
     public static function make(ApiConfig $config): self
     {
@@ -77,12 +78,13 @@ class ApiClient
 
     private function getApiClient(): Client
     {
-        if (!self::$client) {
-            self::$client = new Client(
+        $clientKey = md5(get_class($this->config).json_encode($this->config->clientConfiguration));
+        if (!(self::$clients[$clientKey]??false)) {
+            self::$clients[$clientKey] = new Client(
                 $this->config->clientConfiguration
             );
         }
-        return self::$client;
+        return self::$clients[$clientKey];
     }
 
 }
