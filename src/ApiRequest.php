@@ -4,6 +4,7 @@ namespace p3rs0n\ApiRequest;
 
 use Closure;
 use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Psr7\Response;
 use p3rs0n\ApiRequest\Enums\MethodEnum;
 use p3rs0n\ApiRequest\Exceptions\RequestValidationFailedException;
 use Psr\Http\Message\ResponseInterface;
@@ -37,7 +38,7 @@ abstract class ApiRequest
             throw new RequestValidationFailedException($this);
         }
         if (!$disableCache && $cachedResponse = $this->getCachedResponse()) {
-            return $cachedResponse;
+            return $this->processResponse($cachedResponse);
         }
         try {
             $response = ApiClient::make($this->getApiConfig())->query($this);
@@ -141,9 +142,16 @@ abstract class ApiRequest
     private function getCachedResponse(): ?ResponseInterface
     {
         if ($this->shouldCache && $this->cacheTtl > 0 && $this->getApiConfig()->cache) {
-            $cachedResponse = $this->getApiConfig()->cache->getItem($this->getCacheKey())->get();
-            if ($cachedResponse) {
-                return $cachedResponse;
+            $item = $this->getApiConfig()->cache->getItem($this->getCacheKey());
+            $cached = $item->isHit() ? $item->get() : null;
+            if (is_array($cached) && isset($cached['status'], $cached['headers'], $cached['body'])) {
+                return new Response(
+                    $cached['status'],
+                    $cached['headers'],
+                    $cached['body'],
+                    $cached['version'] ?? '1.1',
+                    $cached['reason'] ?? null,
+                );
             }
         }
         return null;
@@ -151,8 +159,22 @@ abstract class ApiRequest
 
     private function cacheResponse(ResponseInterface $response): void
     {
-        if ($this->shouldCache && $this->cacheTtl > 0 && $this->getApiConfig()->cache) {
-            $this->getApiConfig()->cache->getItem($this->getCacheKey())->expiresAfter($this->cacheTtl)->set($response);
+        if ($this->shouldCache && $this->cacheTtl > 0 && $cache = $this->getApiConfig()->cache) {
+            $body = $response->getBody();
+            $contents = (string) $body;
+            if ($body->isSeekable()) {
+                $body->rewind();
+            }
+            $item = $cache->getItem($this->getCacheKey())
+                ->expiresAfter($this->cacheTtl)
+                ->set([
+                    'status'  => $response->getStatusCode(),
+                    'headers' => $response->getHeaders(),
+                    'body'    => $contents,
+                    'version' => $response->getProtocolVersion(),
+                    'reason'  => $response->getReasonPhrase(),
+                ]);
+            $cache->save($item);
         }
     }
 
