@@ -6,6 +6,7 @@ use GuzzleHttp\Client;
 use JsonException;
 use p3rs0n\ApiRequest\Enums\AuthenticationTypeEnum;
 use Psr\Http\Message\ResponseInterface;
+use Stringable;
 
 class ApiClient
 {
@@ -27,7 +28,8 @@ class ApiClient
      */
     public function query(ApiRequest $request): ResponseInterface
     {
-        return $this->getApiClient()->{$request->method->value}(
+        return $this->getApiClient()->request(
+            strtoupper($request->method->value),
             $request->getUri(),
             [
                 'headers' => $this->getHeaders($request),
@@ -47,7 +49,36 @@ class ApiClient
                 $this->config->authenticationProvider->getAuthenticationParameters($request)
             );
         }
-        return $headers;
+        return $this->normalizeHeaders($headers);
+    }
+
+    /**
+     * Guzzle 8 only accepts header values that are strings or non-empty arrays of strings.
+     * Cast scalars, null and Stringable values to strings (matching Guzzle 7's implicit casting)
+     * and drop headers whose value is an empty array.
+     */
+    private function normalizeHeaders(array $headers): array
+    {
+        $normalized = [];
+        foreach ($headers as $name => $value) {
+            if (is_array($value)) {
+                if ($value === []) {
+                    continue;
+                }
+                $normalized[$name] = array_map($this->normalizeHeaderValue(...), array_values($value));
+            } else {
+                $normalized[$name] = $this->normalizeHeaderValue($value);
+            }
+        }
+        return $normalized;
+    }
+
+    private function normalizeHeaderValue(mixed $value): mixed
+    {
+        if (is_scalar($value) || $value === null || $value instanceof Stringable) {
+            return (string) $value;
+        }
+        return $value;
     }
 
     private function getQueryParameters(ApiRequest $request): array
