@@ -4,3 +4,5 @@ composer.lock
 composer.phar
 /vendor/
 .phpunit.result.cache
+CLAUDE.md
+.claude
